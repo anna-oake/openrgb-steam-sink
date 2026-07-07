@@ -1,0 +1,6 @@
+/.qmake.stash
+/Makefile
+/moc_*.cpp
+/moc_predefs.h
+/*.o
+/build/
