@@ -141,7 +141,7 @@ public:
         effect_timer = new QTimer(this);
         effect_timer->setTimerType(Qt::PreciseTimer);
         connect(effect_timer, &QTimer::timeout, this, [this]() {
-            applyLastSnapshot(true);
+            applyLastSnapshot(true, false);
         });
 
         openShimDevice();
@@ -247,7 +247,7 @@ public:
         normalizeMappingForCurrentLedCount();
         saveConfig();
         resetEffectState();
-        applyLastSnapshot(true);
+        applyLastSnapshot(true, true);
     }
 
     void setMapping(const QString& label, unsigned int start, bool reverse_order)
@@ -258,7 +258,7 @@ public:
 
         normalizeMappingForCurrentLedCount();
         saveConfig();
-        applyLastSnapshot(true);
+        applyLastSnapshot(true, true);
     }
 
 private:
@@ -451,7 +451,7 @@ private:
             resetEffectState();
         configureEffectTimer();
         setStatus(QString("Received Steam LED state #%1.").arg(snapshot.seq));
-        applyLastSnapshot(true);
+        applyLastSnapshot(true, true);
     }
 
     static bool isAnimatedEffect(std::uint8_t effect)
@@ -948,7 +948,7 @@ private:
         return false;
     }
 
-    void applyLastSnapshot(bool advance_animation)
+    void applyLastSnapshot(bool advance_animation, bool check_mode)
     {
         if (!have_snapshot || !sink_active)
             return;
@@ -961,6 +961,14 @@ private:
         const unsigned int target_start = target.start_index + start_led;
         if (!target.controller || target_start + led_count > target.controller->colors.size())
             return;
+
+        if (check_mode) {
+            const int previous_mode = target.controller->active_mode;
+            target.controller->SetCustomMode();
+
+            if (target.controller->active_mode != previous_mode)
+                target.controller->DeviceUpdateMode();
+        }
 
         renderEffectFrame(advance_animation);
 
