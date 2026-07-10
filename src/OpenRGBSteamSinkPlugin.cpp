@@ -1,24 +1,20 @@
 #include "OpenRGBSteamSinkPlugin.h"
+#include "SteamStateSource.h"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QLabel>
 #include <QShowEvent>
-#include <QSocketNotifier>
 #include <QSpinBox>
 #include <QTimer>
 #include <QVBoxLayout>
 
-#include <cerrno>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
-#include <fcntl.h>
 #include <functional>
 #include <string>
-#include <unistd.h>
 #include <vector>
 
 #include "RGBController.h"
@@ -26,53 +22,11 @@
 
 namespace
 {
-constexpr unsigned int SteamLedCount = 17;
 constexpr unsigned int MinRealLedCount = SteamLedCount;
 constexpr unsigned int MaxRealLedCount = SteamLedCount * 10;
 constexpr int StaticRedrawDelayMs = 100;
 constexpr const char* PluginName = "OpenRGB Steam Sink";
 constexpr const char* SettingsKey = "steam-sink";
-constexpr const char* ShimDevicePath = "/dev/valve-leds-shim";
-constexpr std::uint32_t ValveLedsMagic = 0x564c4544;
-constexpr std::uint16_t ValveLedsVersion = 1;
-
-enum ValveLedsEffect : std::uint8_t
-{
-    ValveLedsEffectOff = 0,
-    ValveLedsEffectManual = 1,
-    ValveLedsEffectNormal = 2,
-    ValveLedsEffectRainbow = 3,
-    ValveLedsEffectBreath = 4,
-    ValveLedsEffectPatrol = 5,
-};
-
-struct ValveLedsPixel
-{
-    std::uint8_t r;
-    std::uint8_t g;
-    std::uint8_t b;
-    std::uint8_t brightness;
-};
-
-struct __attribute__((packed)) ValveLedsSnapshot
-{
-    std::uint32_t magic;
-    std::uint16_t version;
-    std::uint16_t size;
-    std::uint64_t seq;
-    std::uint64_t monotonic_ns;
-    std::uint8_t enabled;
-    std::uint8_t effect;
-    std::uint8_t brightness_scale;
-    std::uint8_t delay;
-    std::uint8_t breath_offset;
-    std::uint8_t breath_level;
-    std::uint8_t patrol_num;
-    std::uint8_t color_shift;
-    ValveLedsPixel pixels[SteamLedCount];
-};
-
-static_assert(sizeof(ValveLedsSnapshot) == 100, "valve-leds-shim UAPI size changed");
 
 struct TargetOption
 {
@@ -133,24 +87,29 @@ public:
     {
         loadConfig();
 
-        retry_open_timer = new QTimer(this);
-        retry_open_timer->setInterval(2000);
-        connect(retry_open_timer, &QTimer::timeout, this, [this]() {
-            openShimDevice();
-        });
-
         effect_timer = new QTimer(this);
         effect_timer->setTimerType(Qt::PreciseTimer);
         connect(effect_timer, &QTimer::timeout, this, [this]() {
             applyLastSnapshot(true, false);
         });
 
-        openShimDevice();
+        state_source = createSteamStateSource(this);
+        state_source->setStatusHandler([this](QString status) {
+            setStatus(std::move(status));
+        });
+        state_source->setSnapshotHandler([this](const ValveLedsSnapshot& snapshot) {
+            receiveSnapshot(snapshot);
+        });
+        state_source->setUnavailableHandler([this]() {
+            sourceUnavailable();
+        });
+        state_source->start();
     }
 
     ~SteamSinkRuntime() override
     {
-        closeShimDevice();
+        effect_timer->stop();
+        state_source->stop();
     }
 
     std::vector<TargetOption> enumerateTargets()
@@ -373,71 +332,13 @@ private:
             status_callback();
     }
 
-    void openShimDevice()
+    void receiveSnapshot(const ValveLedsSnapshot& snapshot)
     {
-        if (shim_fd >= 0)
-            return;
-
-        shim_fd = ::open(ShimDevicePath, O_RDONLY | O_NONBLOCK);
-        if (shim_fd < 0) {
-            setStatus(QString("Waiting for %1.").arg(ShimDevicePath));
-            if (!retry_open_timer->isActive())
-                retry_open_timer->start();
-            return;
-        }
-
-        retry_open_timer->stop();
-        setStatus(QString("Reading %1.").arg(ShimDevicePath));
-        readShimSnapshot();
-
-        shim_notifier = new QSocketNotifier(shim_fd, QSocketNotifier::Read, this);
-        connect(shim_notifier, &QSocketNotifier::activated, this, [this]() {
-            shim_notifier->setEnabled(false);
-            readShimSnapshot();
-            shim_notifier->setEnabled(true);
-        });
-    }
-
-    void closeShimDevice()
-    {
-        if (retry_open_timer)
-            retry_open_timer->stop();
-        if (effect_timer)
-            effect_timer->stop();
-
-        disconnectShimDevice();
-    }
-
-    void disconnectShimDevice()
-    {
-        delete shim_notifier;
-        shim_notifier = nullptr;
-
-        if (shim_fd >= 0) {
-            ::close(shim_fd);
-            shim_fd = -1;
-        }
-    }
-
-    void readShimSnapshot()
-    {
-        ValveLedsSnapshot snapshot;
-        const ssize_t bytes_read = ::read(shim_fd, &snapshot, sizeof(snapshot));
-
-        if (bytes_read != static_cast<ssize_t>(sizeof(snapshot))) {
-            if (bytes_read < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-                return;
-
-            setStatus(QString("Lost %1.").arg(ShimDevicePath));
-            disconnectShimDevice();
-            retry_open_timer->start();
-            return;
-        }
-
         if (snapshot.magic != ValveLedsMagic ||
             snapshot.version != ValveLedsVersion ||
             snapshot.size != sizeof(snapshot)) {
-            setStatus(QString("%1 returned an unknown snapshot format.").arg(ShimDevicePath));
+            setStatus("Steam LED source returned an unknown snapshot format.");
+            sourceUnavailable();
             return;
         }
 
@@ -463,6 +364,18 @@ private:
                 }
             });
         }
+    }
+
+    void sourceUnavailable()
+    {
+        if (!have_snapshot)
+            return;
+
+        const bool was_enabled = last_snapshot.enabled;
+        last_snapshot.enabled = false;
+        updateOutputMode(was_enabled);
+        configureEffectTimer();
+        applyLastSnapshot(false, true);
     }
 
     static bool isAnimatedEffect(std::uint8_t effect)
@@ -1008,16 +921,14 @@ private:
     }
 
     ResourceManagerInterface* resource_manager = nullptr;
-    QSocketNotifier* shim_notifier = nullptr;
-    QTimer* retry_open_timer = nullptr;
+    SteamStateSource* state_source = nullptr;
     QTimer* effect_timer = nullptr;
     std::function<void()> status_callback;
-    QString status_text = QString("Waiting for %1.").arg(ShimDevicePath);
+    QString status_text = "Waiting for Steam LED state.";
     QString target_label;
     unsigned int start_led = 0;
     unsigned int real_led_count = SteamLedCount;
     bool reverse = false;
-    int shim_fd = -1;
     bool device_detection_complete = false;
     bool have_snapshot = false;
     bool sink_active = false;
@@ -1075,18 +986,18 @@ public:
         root->addWidget(preview_label);
         root->addStretch();
 
-        connect(real_led_count, &QSpinBox::valueChanged, this, [this]() {
+        connect(real_led_count, qOverload<int>(&QSpinBox::valueChanged), this, [this]() {
             if (updating_ui || !runtime)
                 return;
 
             runtime->setRealLedCount(static_cast<unsigned int>(real_led_count->value()));
             populateTargets();
         });
-        connect(target_combo, &QComboBox::currentIndexChanged, this, [this](int index) {
+        connect(target_combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
             updateStartLedRange(index);
             saveCurrentMapping();
         });
-        connect(start_led, &QSpinBox::valueChanged, this, [this]() {
+        connect(start_led, qOverload<int>(&QSpinBox::valueChanged), this, [this]() {
             updatePreview();
             saveCurrentMapping();
         });

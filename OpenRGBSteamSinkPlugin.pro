@@ -18,7 +18,22 @@ INCLUDEPATH += \
     $$OPENRGB_SOURCE_DIR/RGBController
 
 HEADERS += \
-    src/OpenRGBSteamSinkPlugin.h
+    src/OpenRGBSteamSinkPlugin.h \
+    src/SteamStateSource.h \
+    src/ValveLedsSnapshot.h
 
 SOURCES += \
     src/OpenRGBSteamSinkPlugin.cpp
+
+win32 {
+    DEFINES += NOMINMAX WIN32_LEAN_AND_MEAN
+    SOURCES += src/WindowsStateSource.cpp
+}
+
+unix:!macx {
+    SOURCES += src/LinuxStateSource.cpp
+}
+
+macx {
+    error("OpenRGB Steam Sink does not support macOS")
+}
