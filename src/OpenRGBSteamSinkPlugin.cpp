@@ -453,7 +453,7 @@ private:
             resetEffectState();
         configureEffectTimer();
         setStatus(QString("Received Steam LED state #%1.").arg(snapshot.seq));
-        applyLastSnapshot(true, true);
+        applyLastSnapshot(reset_effect, true);
 
         if (was_animated && snapshot.enabled && !isAnimatedEffect(snapshot.effect)) {
             QTimer::singleShot(StaticRedrawDelayMs, this, [this]() {
