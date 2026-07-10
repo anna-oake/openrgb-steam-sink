@@ -121,6 +121,7 @@ public:
         effect_timer->stop();
         power_state_source->stop();
         state_source->stop();
+        restoreControllerState();
     }
 
     std::vector<TargetOption> enumerateTargets()
@@ -216,6 +217,7 @@ public:
     {
         real_led_count = clampRealLedCount(new_real_led_count);
         normalizeMappingForCurrentLedCount();
+        syncControlledController();
         saveConfig();
         resetEffectState();
         applyLastSnapshot(true, true);
@@ -228,6 +230,7 @@ public:
         reverse = reverse_order;
 
         normalizeMappingForCurrentLedCount();
+        syncControlledController();
         saveConfig();
         applyLastSnapshot(true, true);
     }
@@ -887,6 +890,40 @@ private:
         return false;
     }
 
+    void restoreControllerState()
+    {
+        if (!controlled_controller)
+            return;
+
+        const std::size_t color_count = std::min(controlled_controller->colors.size(), original_colors.size());
+        std::copy_n(original_colors.begin(), color_count, controlled_controller->colors.begin());
+
+        if (original_mode >= 0 && original_mode < static_cast<int>(controlled_controller->modes.size())) {
+            controlled_controller->active_mode = original_mode;
+            controlled_controller->DeviceUpdateMode();
+        }
+
+        controlled_controller = nullptr;
+        original_colors.clear();
+    }
+
+    void syncControlledController()
+    {
+        TargetOption target;
+        RGBController* next_controller = resolveConfiguredTarget(target) ? target.controller : nullptr;
+
+        if (next_controller == controlled_controller)
+            return;
+
+        restoreControllerState();
+
+        if (next_controller) {
+            controlled_controller = next_controller;
+            original_mode = next_controller->active_mode;
+            original_colors = next_controller->colors;
+        }
+    }
+
     void applyLastSnapshot(bool advance_animation, bool check_mode)
     {
         if (!have_snapshot || !sink_active)
@@ -895,6 +932,8 @@ private:
         TargetOption target;
         if (!resolveConfiguredTarget(target))
             return;
+
+        syncControlledController();
 
         const unsigned int led_count = requiredLedCount();
         const unsigned int target_start = target.start_index + start_led;
@@ -948,6 +987,9 @@ private:
     bool sink_active = false;
     bool release_after_black = false;
     bool force_direct_mode = false;
+    RGBController* controlled_controller = nullptr;
+    int original_mode = 0;
+    std::vector<RGBColor> original_colors;
     EffectState effect_state;
     ValveLedsSnapshot last_snapshot = {};
 };
