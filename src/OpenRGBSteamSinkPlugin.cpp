@@ -29,6 +29,7 @@ namespace
 constexpr unsigned int SteamLedCount = 17;
 constexpr unsigned int MinRealLedCount = SteamLedCount;
 constexpr unsigned int MaxRealLedCount = SteamLedCount * 10;
+constexpr int StaticRedrawDelayMs = 100;
 constexpr const char* PluginName = "OpenRGB Steam Sink";
 constexpr const char* SettingsKey = "steam-sink";
 constexpr const char* ShimDevicePath = "/dev/valve-leds-shim";
@@ -443,6 +444,7 @@ private:
         const bool reset_effect = shouldResetEffect(snapshot);
         const bool had_snapshot = have_snapshot;
         const bool was_enabled = have_snapshot && last_snapshot.enabled;
+        const bool was_animated = was_enabled && isAnimatedEffect(last_snapshot.effect);
 
         last_snapshot = snapshot;
         have_snapshot = true;
@@ -452,6 +454,15 @@ private:
         configureEffectTimer();
         setStatus(QString("Received Steam LED state #%1.").arg(snapshot.seq));
         applyLastSnapshot(true, true);
+
+        if (was_animated && snapshot.enabled && !isAnimatedEffect(snapshot.effect)) {
+            QTimer::singleShot(StaticRedrawDelayMs, this, [this]() {
+                if (have_snapshot && last_snapshot.enabled &&
+                    !isAnimatedEffect(last_snapshot.effect)) {
+                    applyLastSnapshot(false, false);
+                }
+            });
+        }
     }
 
     static bool isAnimatedEffect(std::uint8_t effect)
@@ -923,8 +934,12 @@ private:
             break;
 
         case ValveLedsEffectRainbow:
-            if (advance_animation)
-                renderRainbowFrame();
+            if (advance_animation) {
+                const unsigned int frames = effect_state.rainbow_slot == 1 ? led_count + 1 : 1;
+
+                for (unsigned int frame = 0; frame < frames; frame++)
+                    renderRainbowFrame();
+            }
             break;
 
         default:
