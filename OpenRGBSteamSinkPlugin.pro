@@ -19,6 +19,7 @@ INCLUDEPATH += \
 
 HEADERS += \
     src/OpenRGBSteamSinkPlugin.h \
+    src/PowerStateSource.h \
     src/SteamStateSource.h \
     src/ValveLedsSnapshot.h
 
@@ -27,11 +28,16 @@ SOURCES += \
 
 win32 {
     DEFINES += NOMINMAX WIN32_LEAN_AND_MEAN
-    SOURCES += src/WindowsStateSource.cpp
+    SOURCES += \
+        src/WindowsPowerStateSource.cpp \
+        src/WindowsStateSource.cpp
 }
 
 unix:!macx {
-    SOURCES += src/LinuxStateSource.cpp
+    QT += dbus
+    SOURCES += \
+        src/LinuxPowerStateSource.cpp \
+        src/LinuxStateSource.cpp
 }
 
 macx {

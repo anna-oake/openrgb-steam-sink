@@ -1,4 +1,5 @@
 #include "OpenRGBSteamSinkPlugin.h"
+#include "PowerStateSource.h"
 #include "SteamStateSource.h"
 
 #include <QCheckBox>
@@ -104,11 +105,21 @@ public:
             sourceUnavailable();
         });
         state_source->start();
+
+        power_state_source = createPowerStateSource(this);
+        power_state_source->setResumeHandler([this]() {
+            force_direct_mode = true;
+            QTimer::singleShot(500, this, [this]() {
+                applyLastSnapshot(false, true);
+            });
+        });
+        power_state_source->start();
     }
 
     ~SteamSinkRuntime() override
     {
         effect_timer->stop();
+        power_state_source->stop();
         state_source->stop();
     }
 
@@ -894,8 +905,10 @@ private:
             const int previous_mode = target.controller->active_mode;
             target.controller->SetCustomMode();
 
-            if (target.controller->active_mode != previous_mode)
+            if (force_direct_mode || target.controller->active_mode != previous_mode) {
                 target.controller->DeviceUpdateMode();
+                force_direct_mode = false;
+            }
         }
 
         renderEffectFrame(advance_animation);
@@ -922,6 +935,7 @@ private:
 
     ResourceManagerInterface* resource_manager = nullptr;
     SteamStateSource* state_source = nullptr;
+    PowerStateSource* power_state_source = nullptr;
     QTimer* effect_timer = nullptr;
     std::function<void()> status_callback;
     QString status_text = "Waiting for Steam LED state.";
@@ -933,6 +947,7 @@ private:
     bool have_snapshot = false;
     bool sink_active = false;
     bool release_after_black = false;
+    bool force_direct_mode = false;
     EffectState effect_state;
     ValveLedsSnapshot last_snapshot = {};
 };
