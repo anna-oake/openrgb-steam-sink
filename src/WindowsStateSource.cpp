@@ -182,3 +182,5 @@ SteamStateSource* createSteamStateSource(QObject* parent)
 {
     return new WindowsStateSource(parent);
 }
+
+// :3jb(!!!!!!!!!!!
