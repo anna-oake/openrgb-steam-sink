@@ -1238,7 +1238,7 @@ OpenRGBPluginInfo OpenRGBSteamSinkPlugin::GetPluginInfo()
 
     info.Name = PluginName;
     info.Description = "Receives Steam front light bar state";
-    info.Version = "0.2.0";
+    info.Version = "0.3.0";
     info.Commit = "";
     info.URL = "https://github.com/anna-oake/openrgb-steam-sink";
     info.Location = OPENRGB_PLUGIN_LOCATION_TOP;
