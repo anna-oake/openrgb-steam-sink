@@ -37,16 +37,16 @@
     "openrgb-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1782681951,
-        "narHash": "sha256-x7B3Ht9+JM+w/3qL5Ku08r05BBLrbuO5JBqP4fnJ0nc=",
+        "lastModified": 1789168018,
+        "narHash": "sha256-623tJu5RYa1530xRtkRb1g62ANJCmRv1do0Ck4YzEYo=",
         "owner": "CalcProgrammer1",
         "repo": "OpenRGB",
-        "rev": "6fbcf62d7694e7b92fd0a5884b40b92984fbd1b0",
+        "rev": "81bbe18a84c2e507006f19dd252e397e40a56bfe",
         "type": "gitlab"
       },
       "original": {
         "owner": "CalcProgrammer1",
-        "ref": "release_candidate_1.0rc3",
+        "ref": "release_1.0",
         "repo": "OpenRGB",
         "type": "gitlab"
       }

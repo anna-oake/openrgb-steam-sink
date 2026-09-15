@@ -3,6 +3,9 @@
 OpenRGB plugin that maps Steam's 17-LED Front bar state onto a segment of any
 OpenRGB controller.
 
+Targets OpenRGB 1.0 (plugin API 5). Build against the source version matching
+the OpenRGB host.
+
 The effect engine and OpenRGB mapping are shared across platforms. Only the
 state transport differs:
 
@@ -20,9 +23,9 @@ make
 
 ## Windows development
 
-Use the 64-bit MSVC 2019 Qt 5.15.0 environment used by the OpenRGB 1.0rc3
+Use the 64-bit MSVC 2019 Qt 5.15.0 environment used by the OpenRGB 1.0
 Qt 5 Windows build, set
-`OPENRGB_SOURCE_DIR` to an OpenRGB 1.0rc3 source checkout, then run:
+`OPENRGB_SOURCE_DIR` to an OpenRGB 1.0 source checkout, then run:
 
 ```bat
 scripts\build-windows.bat

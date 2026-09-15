@@ -18,11 +18,9 @@
 #include <string>
 #include <vector>
 
-#include "RGBController.h"
-#include "SettingsManager.h"
-
 namespace
 {
+using nlohmann::json;
 constexpr unsigned int MinRealLedCount = SteamLedCount;
 constexpr unsigned int MaxRealLedCount = SteamLedCount * 10;
 constexpr int StaticRedrawDelayMs = 100;
@@ -32,7 +30,7 @@ constexpr const char* SettingsKey = "steam-sink";
 struct TargetOption
 {
     QString label;
-    RGBController* controller = nullptr;
+    RGBControllerInterface* controller = nullptr;
     unsigned int start_index = 0;
     unsigned int led_count = 0;
 };
@@ -82,7 +80,7 @@ public:
 class SteamSinkRuntime : public QObject
 {
 public:
-    explicit SteamSinkRuntime(ResourceManagerInterface* resource_manager_ptr, QObject* parent = nullptr)
+    explicit SteamSinkRuntime(OpenRGBPluginAPIInterface* resource_manager_ptr, QObject* parent = nullptr)
         : QObject(parent)
         , resource_manager(resource_manager_ptr)
     {
@@ -132,19 +130,19 @@ public:
             return result;
 
         if (!device_detection_complete) {
-            resource_manager->WaitForDeviceDetection();
+            resource_manager->WaitForDetection();
             device_detection_complete = true;
         }
 
-        for (RGBController* controller : resource_manager->GetRGBControllers()) {
+        for (RGBControllerInterface* controller : resource_manager->GetRGBControllers()) {
             const QString controller_name = controllerLabel(controller);
-            const unsigned int controller_leds = controller->colors.size();
+            const unsigned int controller_leds = controller->GetLEDCount();
 
             addTarget(result, QString("%1 - whole device (%2 LEDs)").arg(controller_name).arg(controller_leds),
                       controller, 0, controller_leds);
 
-            for (unsigned int zone_index = 0; zone_index < controller->zones.size(); zone_index++) {
-                const zone& target_zone = controller->zones[zone_index];
+            for (unsigned int zone_index = 0; zone_index < controller->GetZoneCount(); zone_index++) {
+                const zone target_zone = controller->GetZone(zone_index);
                 const QString zone_name = QString::fromStdString(target_zone.name);
 
                 addTarget(result,
@@ -249,10 +247,10 @@ private:
         return real_led_count / SteamLedCount;
     }
 
-    static QString controllerLabel(const RGBController* controller)
+    static QString controllerLabel(RGBControllerInterface* controller)
     {
-        QString name = QString::fromStdString(controller->name);
-        QString vendor = QString::fromStdString(controller->vendor);
+        QString name = QString::fromStdString(controller->GetName());
+        QString vendor = QString::fromStdString(controller->GetVendor());
 
         if (!vendor.isEmpty())
             return QString("%1 %2").arg(vendor, name).trimmed();
@@ -262,7 +260,7 @@ private:
 
     void addTarget(std::vector<TargetOption>& targets,
                    QString label,
-                   RGBController* controller,
+                   RGBControllerInterface* controller,
                    unsigned int start_index,
                    unsigned int led_count) const
     {
@@ -302,11 +300,10 @@ private:
 
     void loadConfig()
     {
-        SettingsManager* settings_manager = resource_manager ? resource_manager->GetSettingsManager() : nullptr;
-        if (!settings_manager)
+        if (!resource_manager)
             return;
 
-        const json settings = settings_manager->GetSettings(SettingsKey);
+        const json settings = resource_manager->GetSettings(SettingsKey);
 
         if (settings.contains("target") && settings["target"].is_string())
             target_label = QString::fromStdString(settings["target"].get<std::string>());
@@ -322,8 +319,7 @@ private:
 
     void saveConfig()
     {
-        SettingsManager* settings_manager = resource_manager ? resource_manager->GetSettingsManager() : nullptr;
-        if (!settings_manager)
+        if (!resource_manager)
             return;
 
         json settings;
@@ -332,8 +328,8 @@ private:
         settings["real_led_count"] = real_led_count;
         settings["reverse"] = reverse;
 
-        settings_manager->SetSettings(SettingsKey, settings);
-        settings_manager->SaveSettings();
+        resource_manager->SetSettings(SettingsKey, settings);
+        resource_manager->SaveSettings();
     }
 
     void setStatus(QString status)
@@ -895,12 +891,11 @@ private:
         if (!controlled_controller)
             return;
 
-        const std::size_t color_count = std::min(controlled_controller->colors.size(), original_colors.size());
-        std::copy_n(original_colors.begin(), color_count, controlled_controller->colors.begin());
+        const std::size_t color_count = std::min<std::size_t>(controlled_controller->GetLEDCount(), original_colors.size());
+        std::copy_n(original_colors.begin(), color_count, controlled_controller->GetColorsPointer());
 
-        if (original_mode >= 0 && original_mode < static_cast<int>(controlled_controller->modes.size())) {
-            controlled_controller->active_mode = original_mode;
-            controlled_controller->DeviceUpdateMode();
+        if (original_mode >= 0 && original_mode < static_cast<int>(controlled_controller->GetModeCount())) {
+            controlled_controller->SetActiveMode(original_mode);
         }
 
         controlled_controller = nullptr;
@@ -910,7 +905,7 @@ private:
     void syncControlledController()
     {
         TargetOption target;
-        RGBController* next_controller = resolveConfiguredTarget(target) ? target.controller : nullptr;
+        RGBControllerInterface* next_controller = resolveConfiguredTarget(target) ? target.controller : nullptr;
 
         if (next_controller == controlled_controller)
             return;
@@ -919,8 +914,9 @@ private:
 
         if (next_controller) {
             controlled_controller = next_controller;
-            original_mode = next_controller->active_mode;
-            original_colors = next_controller->colors;
+            original_mode = next_controller->GetActiveMode();
+            original_colors.assign(next_controller->GetColorsPointer(),
+                                   next_controller->GetColorsPointer() + next_controller->GetLEDCount());
         }
     }
 
@@ -937,17 +933,33 @@ private:
 
         const unsigned int led_count = requiredLedCount();
         const unsigned int target_start = target.start_index + start_led;
-        if (!target.controller || target_start + led_count > target.controller->colors.size())
+        if (!target.controller || target_start + led_count > target.controller->GetLEDCount())
             return;
 
         if (check_mode) {
-            const int previous_mode = target.controller->active_mode;
-            target.controller->SetCustomMode();
-
-            if (force_direct_mode || target.controller->active_mode != previous_mode) {
-                target.controller->DeviceUpdateMode();
-                force_direct_mode = false;
+            // rc3 selected a custom mode without sending a hardware update.
+            // API 5 SetCustomMode updates hardware even when the mode is unchanged.
+            int selected_mode = target.controller->GetActiveMode();
+            bool found_mode = false;
+            for (const char* name : { "Direct", "Custom", "Static" }) {
+                for (unsigned int mode = 0; mode < target.controller->GetModeCount(); mode++) {
+                    const auto color_mode = target.controller->GetModeColorMode(mode);
+                    if (target.controller->GetModeName(mode) == name
+                        && (color_mode == MODE_COLORS_PER_LED || color_mode == MODE_COLORS_MODE_SPECIFIC)) {
+                        selected_mode = static_cast<int>(mode);
+                        found_mode = true;
+                        break;
+                    }
+                }
+                if (found_mode)
+                    break;
             }
+
+            if (selected_mode != target.controller->GetActiveMode())
+                target.controller->SetActiveMode(selected_mode);
+            else if (force_direct_mode)
+                target.controller->UpdateMode();
+            force_direct_mode = false;
         }
 
         renderEffectFrame(advance_animation);
@@ -961,7 +973,7 @@ private:
                 ? scaledColor(effect_state.pixels[real_led], last_snapshot.brightness_scale)
                 : Rgb8 {};
 
-            target.controller->SetLED(mapped_led, toOpenRgbColor(color));
+            target.controller->SetColor(mapped_led, toOpenRgbColor(color));
         }
 
         target.controller->UpdateLEDs();
@@ -972,7 +984,7 @@ private:
         }
     }
 
-    ResourceManagerInterface* resource_manager = nullptr;
+    OpenRGBPluginAPIInterface* resource_manager = nullptr;
     SteamStateSource* state_source = nullptr;
     PowerStateSource* power_state_source = nullptr;
     QTimer* effect_timer = nullptr;
@@ -987,7 +999,7 @@ private:
     bool sink_active = false;
     bool release_after_black = false;
     bool force_direct_mode = false;
-    RGBController* controlled_controller = nullptr;
+    RGBControllerInterface* controlled_controller = nullptr;
     int original_mode = 0;
     std::vector<RGBColor> original_colors;
     EffectState effect_state;
@@ -1222,7 +1234,7 @@ private:
 
 OpenRGBPluginInfo OpenRGBSteamSinkPlugin::GetPluginInfo()
 {
-    OpenRGBPluginInfo info;
+    OpenRGBPluginInfo info {};
 
     info.Name = PluginName;
     info.Description = "Receives Steam front light bar state";
@@ -1240,7 +1252,7 @@ unsigned int OpenRGBSteamSinkPlugin::GetPluginAPIVersion()
     return OPENRGB_PLUGIN_API_VERSION;
 }
 
-void OpenRGBSteamSinkPlugin::Load(ResourceManagerInterface* resource_manager_ptr)
+void OpenRGBSteamSinkPlugin::Load(OpenRGBPluginAPIInterface* resource_manager_ptr)
 {
     resource_manager = resource_manager_ptr;
     runtime = new SteamSinkRuntime(resource_manager, this);

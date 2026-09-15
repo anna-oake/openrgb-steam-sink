@@ -5,6 +5,8 @@ QT += core gui widgets
 TARGET = OpenRGBSteamSinkPlugin
 DESTDIR = build
 
+DISTFILES += src/OpenRGBSteamSinkPlugin.json
+
 OPENRGB_SOURCE_DIR = $$(OPENRGB_SOURCE_DIR)
 isEmpty(OPENRGB_SOURCE_DIR) {
     error("OPENRGB_SOURCE_DIR is not set; enter nix develop or export it manually")

@@ -1,0 +1,7 @@
+{
+    "OpenRGBPluginAPIVersion": 5,
+    "Id": "org.openrgb.steam-sink",
+    "Name": "OpenRGB Steam Sink",
+    "Url": "https://github.com/anna-oake/openrgb-steam-sink",
+    "VersionStr": "0.2.0"
+}

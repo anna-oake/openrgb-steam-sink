@@ -21,9 +21,9 @@ jobs:
         with:
           arch: x64
 
-      - name: Fetch OpenRGB 1.0rc3
+      - name: Fetch OpenRGB 1.0
         shell: pwsh
-        run: git clone --depth 1 --branch release_candidate_1.0rc3 https://gitlab.com/CalcProgrammer1/OpenRGB.git OpenRGB
+        run: git clone --depth 1 --branch release_1.0 https://gitlab.com/CalcProgrammer1/OpenRGB.git OpenRGB
 
       - name: Build plugin
         shell: cmd

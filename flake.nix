@@ -4,7 +4,7 @@
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
   inputs.flake-utils.url = "github:numtide/flake-utils";
   inputs.openrgb-src = {
-    url = "gitlab:CalcProgrammer1/OpenRGB?ref=release_candidate_1.0rc3";
+    url = "gitlab:CalcProgrammer1/OpenRGB?ref=release_1.0";
     flake = false;
   };
 
